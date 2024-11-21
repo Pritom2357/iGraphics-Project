@@ -6,7 +6,9 @@
 //
 //  Version: 2.0.2012.2015
 //
-
+// #pragma once
+#ifndef IGRAPHICS_H
+#define IGRAPHICS_H
 # include <stdio.h>
 # include <stdlib.h>
 #pragma comment(lib, "glut32.lib")
@@ -546,3 +548,5 @@ void iInitialize(int width=500, int height=500, char *title="iGraphics")
 
     glutMainLoop();
 }
+
+#endif
