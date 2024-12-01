@@ -513,6 +513,11 @@ void mouseHandlerFF(int button, int state, int x, int y)
     glFlush();
 }
 
+void playMainMenuMusic(){
+    PlaySound(TEXT("space_sound.wav"), NULL, SND_ASYNC | SND_LOOP);
+    // PlaySound(TEXT("laser_gun.wav"), NULL, SND_ASYNC | SND_FILENAME);
+}
+
 void iInitialize(int width=500, int height=500, char *title="iGraphics")
 {
     iScreenHeight = height;
@@ -545,6 +550,8 @@ void iInitialize(int width=500, int height=500, char *title="iGraphics")
     //
     glAlphaFunc(GL_GREATER,0.0f);
     glEnable(GL_ALPHA_TEST);
+
+    playMainMenuMusic();
 
     glutMainLoop();
 }
