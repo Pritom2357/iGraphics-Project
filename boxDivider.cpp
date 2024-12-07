@@ -5,21 +5,87 @@
 #include "windows.h"
 #include "stdbool.h"
 #include <stdio.h>
+// #include<iostream>
+// #include<vector>
+#include<bits/stdc++.h>
+using namespace std;
 
 // Window dimensions
-int winWidth = 800;
-int winHeight = 600;
+const int winWidth = 800;
+const int winHeight = 600;
 int gamestate = 0;
 
 // Constants
 #define PI 3.14159265358979323846
-#define MAX_BULLET 100
-#define NUM_STARS 100
+//bullet properties
+#define MAX_BULLET 50
+#define BULLET_SPEED 0.8
+#define BULLET_LIFETIME 2.0
+//star properties
+#define NUM_STARS 50
 #define NUM_LAYERS 3
-#define MAX_PARTICLES 200
-#define MAX_ENEMIES 200
+//particle properties
+#define PARTICLE_POOL_SIZE 300
+#define MAX_ACTIVE_PARTICLES 50
+#define PARTICLE_CLEANUP_THRESHOLD 0.05
+//enemy properties
+#define MAX_ENEMIES 100
+//grid properties
+#define GRID_CELL_SIZE 64
+#define GRID_WIDTH (winWidth/GRID_CELL_SIZE)
+#define GRID_HEIGHT (winHeight/GRID_CELL_SIZE)
+//player properties
+#define PLAYER_ACCELERATION 0.5
+#define PLAYER_MAX_SPEED 15.0
+#define PLAYER_FRICTION 0.98
+#define MOVEMENT_SMOOTHING 0.8
+#define MIN_VELOCITY 0.01
+//powerups
+#define MAX_POWERUPS 5
+#define POWERUP_SPAWN_CHANCE 20
+#define POWERUP_SIZE 15.0
+#define POWERUP_DURATION 10.0
+//notifications
+#define NOTIFICATION_DURATION 10.0
+#define NOTIFICATION_Y 500
+//healt bar properties
+#define HEALTH_BAR_WIDTH 40.0
+#define HEALTH_BAR_HEIGHT 5.0
+#define HEALTH_BAR_OFFSET 20.0
+#define MAX_PLAYER_HEALTH 100
+
 
 //structures
+typedef struct{
+    vector<int> enemies;
+    vector<int> particles;
+    vector<int> projectiles;
+}GridCell;
+
+typedef struct {
+    char text[50];
+    double timer;
+    bool active;
+    int alpha; 
+} Notification;
+
+enum PowerupType{
+    TRIPLE_SHOT,
+    SPEED_BOOST,
+    SHIELD,
+    RAPID_FIRE,
+    HEALTH_BOOST
+};
+
+typedef struct{
+    double x, y;
+    double angle;
+    bool active;
+    PowerupType type;
+    double duration;
+    double rotationSpeed;
+}PowerUp;
+
 typedef struct {
     double x, y;
     double radius;
@@ -31,6 +97,7 @@ typedef struct {
     int r, g, b;
     double vx, vy;   
     int state = rand()%2; 
+    int gridX, gridY;
 } Enemy;
 
 typedef struct {
@@ -40,6 +107,7 @@ typedef struct {
     double size;
     double r, g, b;
     bool active;
+    int gridX, gridY;
 } Particle;
 
 typedef struct {
@@ -51,21 +119,41 @@ typedef struct {
     double x, y;
     double vx, vy;
     double angle;
+    bool active;
+    double lifetime;
 } Projectile;
 
+GridCell grid[GRID_WIDTH][GRID_HEIGHT];
 Star stars[NUM_LAYERS][NUM_STARS];
 Enemy enemies[MAX_ENEMIES];
-Particle particles[MAX_PARTICLES];
+Particle particles[PARTICLE_POOL_SIZE];
 Projectile projectiles[MAX_BULLET];
+PowerUp powerups[MAX_POWERUPS];
+int powerupCount = 0;
+bool hasTripleShot = false;
+bool hasSpeedBoost = false;
+bool hasShield = false;
+bool hasRapidFire = false;
+double powerUpTimer = 0.0;
 int particleCount = 0; 
 int enemyCount = 0;
 int projectileCount = 0;
+double shieldTimer = 0.0;
+bool shieldActive = false;
+Notification currentNotification = {"", 0.0, false, 255};
+int playerHealth = MAX_PLAYER_HEALTH;
+
+inline int getGridx(double x){return (int)(x/GRID_CELL_SIZE);}
+inline int getGridy(double y){return (int)(y/GRID_CELL_SIZE);}
 
 
 // Player Properties
 double bulletWidth = 5;
 double bulletLen = 30;
 int currentLevel = 1;
+
+double playerVX = 0.0;
+double playerVY = 0.0;
 
 double rocketX = 50;
 double rocketY = winHeight / 2;
@@ -96,7 +184,7 @@ double levelBarY = 20;
 bool isInMainMenu = true;
 
 double lastShotTime = 0.0;
-double shootInterval = 0.15;
+double shootInterval = 0.1;
 
 // Blinking Variables
 bool isBlinking = false;
@@ -119,7 +207,7 @@ void moveRocket();
 void moveProjectiles();
 void checkParticleCollisions();
 void damageEnemy(int index);
-bool isPointInPolygon(double px, double py, Enemy e);
+bool isPointInPolygon(double px, double py, Enemy* e);
 void checkProjectileCollisions();
 double iGetTime();
 void drawHeart(double x, double y, double size);
@@ -131,6 +219,266 @@ void iKeyboard(unsigned char key);
 void iSpecialKeyboard(unsigned char key);
 
 // Function Implementations
+
+// Modify drawPlayerHealth to drawPlayerHeart
+void drawPlayerHearts() {
+    double heartSize = 8.0;  // Size of each heart
+    double spacing = 2.0;   // Spaace between hearts
+    double baseY = rocketY + rocketSize + 10;  // Base Y position above player
+    
+    double totalWidth = (playerLives*heartSize*2) + ((playerLives-1)*spacing);
+    double startX = rocketX - totalWidth/2;
+
+    for(int i = 0; i < playerLives; i++) {
+        // Calculate position for each heart
+        double heartX = startX + i*(heartSize*2 + spacing);  // Center hearts above player
+        double heartY = baseY;
+        
+        // Draw heart shape
+        int points = 30;
+        double angleStep = (2 * PI) / points;
+        double verticesX[30];
+        double verticesY[30];
+        
+        for(int j = 0; j < points; j++) {
+            double theta = j * angleStep;
+            double scale = 16 * pow(sin(theta), 3);
+            double px = heartSize * scale / 16;
+            double py = heartSize * (13 * cos(theta) - 5 * cos(2 * theta) - 2 * cos(3 * theta) - cos(4 * theta)) / 16;
+            verticesX[j] = heartX + px;
+            verticesY[j] = heartY + py;
+        }
+        
+        // Draw filled heart
+        iSetColor(255, 0, 0);  // Red hearts
+        iFilledPolygon(verticesX, verticesY, points);
+    }
+}
+
+void damagePlayer() {
+    if (!isInvincible) {
+        playerHealth -= 20;  // Damage amount
+        
+        if (playerHealth <= 0) {
+            playerHealth = 0;
+            playerLives--;
+            
+            if (playerLives > 0) {
+                // Reset health if lives remaining
+                playerHealth = MAX_PLAYER_HEALTH;
+            } else {
+                // Game over
+                printf("Game Over! Restarting...\n");
+                playerLives = 3;
+                playerHealth = MAX_PLAYER_HEALTH;
+                currentLevel = 1;
+                enemiesDestroyed = 0;
+                enemyCount = 0;
+                projectileCount = 0;
+                particleCount = 0;
+                rocketX = 50;
+                rocketY = winHeight / 2;
+            }
+        }
+        
+        isInvincible = true;
+        invincibleTime = 0.0;
+    }
+}
+
+void spawnPowerUp(double x, double y) {
+    if (powerupCount >= MAX_POWERUPS) return;
+    if (rand() % 100 >= POWERUP_SPAWN_CHANCE) return;
+    
+    PowerUp* p = &powerups[powerupCount++];
+    p->x = x;
+    p->y = y;
+    p->active = true;
+    p->type = (PowerupType)(rand() % 5);
+    p->angle = 0;
+    p->rotationSpeed = ((rand() % 10) - 5) * 0.001;
+    p->duration = POWERUP_DURATION;
+}
+
+
+void showNotification(const char* text) {
+    strcpy(currentNotification.text, text);
+    currentNotification.timer = NOTIFICATION_DURATION;
+    currentNotification.active = true;
+    currentNotification.alpha = 255;
+}
+
+void updatePowerUps(double deltaTime) {
+    int speed;
+    // Update active effects
+    if (powerUpTimer > 0) {
+        powerUpTimer -= deltaTime;
+        if (powerUpTimer <= 0) {
+            hasTripleShot = false;
+            hasSpeedBoost = false;
+            hasRapidFire = false;
+            
+            // Reset affected values
+            shootInterval = 0.15;
+            speed=PLAYER_MAX_SPEED;
+        }
+    }
+
+    if (shieldActive && shieldTimer > 0) {
+        shieldTimer -= deltaTime;
+        if (shieldTimer <= 0) {
+            shieldActive = false;
+            isInvincible = false;
+            hasShield = false;
+        }
+    }
+
+    // Update powerups
+    for (int i = 0; i < powerupCount; i++) {
+        if (!powerups[i].active) continue;
+        
+        powerups[i].angle += powerups[i].rotationSpeed;
+        
+        // Check collection
+        double dx = powerups[i].x - rocketX;
+        double dy = powerups[i].y - rocketY;
+        double distance = sqrt(dx * dx + dy * dy);
+        
+        if (distance < (POWERUP_SIZE + playerRadius)) {
+            // Apply effect
+            switch (powerups[i].type) {
+                case TRIPLE_SHOT:
+                    hasTripleShot = true;
+                    showNotification("Triple Shot Activated!");
+                    break;
+                case SPEED_BOOST:
+                    hasSpeedBoost = true;
+                    showNotification("Speed Boost Activated!");
+                    speed=25;
+                    break;
+                case SHIELD:
+                    shieldActive = true;
+                    hasShield = true;
+                    isInvincible = true;
+                    shieldTimer = POWERUP_DURATION;
+                    showNotification("Shield Activated!");
+                    break;
+                case RAPID_FIRE:
+                    hasRapidFire = true;
+                    showNotification("Rapid Fire Activated!");
+                    shootInterval = 0.05;
+                    break;
+                case HEALTH_BOOST:
+                    playerLives = min(playerLives + 1, 5);
+                    showNotification("Health Restored!");
+                    break;
+            }
+            
+            powerUpTimer = POWERUP_DURATION;
+            powerups[i] = powerups[--powerupCount];
+            i--;
+        }
+    }
+}
+
+// Modify drawNotification function
+void drawNotification(double deltaTime) {
+    if (currentNotification.active) {
+        currentNotification.timer -= deltaTime;
+        
+        // Calculate fade based on timer
+        int colorValue = (int)(255 * fmin(1.0, currentNotification.timer / 0.5));
+        
+        if (currentNotification.timer <= 0) {
+            currentNotification.active = false;
+        } else {
+            // Draw notification text with fading
+            iSetColor(colorValue, colorValue, colorValue);
+            iText(winWidth/2 - 100, NOTIFICATION_Y, currentNotification.text, GLUT_BITMAP_HELVETICA_18);
+            
+            // Draw power-up timer if active
+            if (powerUpTimer > 0) {
+                char timerText[20];
+                sprintf(timerText, "%.1f", powerUpTimer);
+                iSetColor(colorValue, colorValue, colorValue);
+                iText(winWidth/2 - 20, NOTIFICATION_Y - 25, timerText, GLUT_BITMAP_HELVETICA_12);
+            }
+        }
+    }
+}
+
+void drawPowerUps() {
+    for (int i = 0; i < powerupCount; i++) {
+        if (!powerups[i].active) continue;
+        
+        // Set color based on type
+        switch (powerups[i].type) {
+            case TRIPLE_SHOT:
+                iSetColor(255, 255, 0);  // Yellow
+                break;
+            case SPEED_BOOST:
+                iSetColor(0, 255, 0);    // Green
+                break;
+            case SHIELD:
+                iSetColor(0, 255, 255);  // Cyan
+                break;
+            case RAPID_FIRE:
+                iSetColor(255, 0, 255);  // Magenta
+                break;
+            case HEALTH_BOOST:
+                iSetColor(255, 0, 0);    // Red
+                break;
+        }
+        
+        // Draw powerup
+        double size = POWERUP_SIZE;
+        int sides = 6;  // Hexagon
+        double xCoords[6], yCoords[6];
+        
+        for (int j = 0; j < sides; j++) {
+            double theta = 2 * PI * j / sides + powerups[i].angle;
+            xCoords[j] = powerups[i].x + size * cos(theta);
+            yCoords[j] = powerups[i].y + size * sin(theta);
+        }
+        
+        iFilledPolygon(xCoords, yCoords, sides);
+    }
+}
+
+void updateGrid(){
+    for(int x=0;x<GRID_WIDTH;x++){
+        for(int y=0;y<GRID_HEIGHT;y++){
+            grid[x][y].enemies.clear();
+            grid[x][y].particles.clear();
+            grid[x][y].particles.clear();
+        }
+    }
+
+    for(int i=0;i<enemyCount;i++){
+        if(enemies[i].active){
+            int gx = getGridx(enemies[i].x);
+            int gy = getGridy(enemies[i].y);
+
+            if(gx>=0 && gx<GRID_WIDTH && gy>=0 && gy<GRID_HEIGHT){
+                enemies[i].gridX=gx;
+                enemies[i].gridY=gy;
+                grid[gx][gy].enemies.push_back(i);
+            }
+        }
+    }
+
+    for(int i = 0; i < particleCount; i++) {
+        if(particles[i].active) {
+            int gx = getGridx(particles[i].x);
+            int gy = getGridy(particles[i].y);
+            if(gx >= 0 && gx < GRID_WIDTH && gy >= 0 && gy < GRID_HEIGHT) {
+                particles[i].gridX = gx;
+                particles[i].gridY = gy;
+                grid[gx][gy].particles.push_back(i);
+            }
+        }
+    }
+}
 
 void spawnEnemy() {
     if (enemyCount < MAX_ENEMIES) {
@@ -207,6 +555,8 @@ void breakEnemy(int index) {
     if (enemies[index].active && enemies[index].health <= 0) {
         // PlaySound(TEXT("explosion.wav"), NULL, 1);
 
+        spawnPowerUp(enemies[index].x, enemies[index].y);
+
         Enemy *e = &enemies[index];
 
         int numParticlesPerVertex = 5; 
@@ -248,7 +598,7 @@ void breakEnemy(int index) {
         }
 
         for (int v = 0; v < numVertices; v++) {
-            for (int i = 0; i < numParticlesPerVertex && particleCount < MAX_PARTICLES; i++) {
+            for (int i = 0; i < numParticlesPerVertex && particleCount < MAX_ACTIVE_PARTICLES; i++) {
                 Particle *p = &particles[particleCount];
                 p->x = xCoords[v];
                 p->y = yCoords[v];
@@ -274,63 +624,137 @@ void breakEnemy(int index) {
 }
 
 void updateParticles(double deltaTime) {
-    for (int i = 0; i < particleCount; i++) {
-        if (particles[i].active) {
-            particles[i].x += particles[i].vx;
-            particles[i].y += particles[i].vy;
+    static double cleanupTImer = 0;
+    cleanupTImer+=deltaTime;
+    
+    if (cleanupTImer >= PARTICLE_CLEANUP_THRESHOLD) {
+        int activeCount = 0;
+        for(int i=0; i<particleCount; i++){
+            if(particles[i].active){
+                if(i!=activeCount){
+                    particles[activeCount] = particles[i];
+                }
+                activeCount++;
+            }
+        }
+        particleCount = activeCount;
+        cleanupTImer = 0;
+    }
 
-            double friction = 0.99; 
-            particles[i].vx *= friction;
-            particles[i].vy *= friction;
+    int activeParticles = 0;
+    for(int i=0; i<particleCount && activeParticles<MAX_ACTIVE_PARTICLES; i++){
+        if(particles[i].active){
+            activeParticles++;
 
-            particles[i].lifespan -= deltaTime;
+            Particle* p = &particles[i];
 
-            particles[i].size *= friction;
+            p->x += p->vx;
+            p->y += p->vy;
 
-            if (particles[i].lifespan <= 0) {
-                
-                particles[i] = particles[particleCount - 1];
-                particleCount--;
-                i--;  
+            const double friction = 0.99; 
+            p->vx *= friction;
+            p->vy *= friction;
+            p->size *= friction;
+
+            p->lifespan -= deltaTime;
+
+            if(p->lifespan<=0){
+                p->active=false;
             }
         }
     }
 
+    // for (int i = 0; i < particleCount; i++) {
+    //     if (particles[i].active) {
+    //         particles[i].x += particles[i].vx;
+    //         particles[i].y += particles[i].vy;
+
+    //         double friction = 0.99; 
+    //         particles[i].vx *= friction;
+    //         particles[i].vy *= friction;
+
+    //         particles[i].lifespan -= deltaTime;
+
+    //         particles[i].size *= friction; 
+
+    //         if (particles[i].lifespan <= 0) {
+                
+    //             particles[i] = particles[particleCount - 1];
+    //             particleCount--;
+    //             i--;  
+    //         }
+    //     }
+    // }
+
     // printf("Active Particles: %d\n", particleCount);
 }
 
+void createParticles(double x, double y, double vx, double vy){
+    if(particleCount>=PARTICLE_POOL_SIZE || particleCount>=MAX_ACTIVE_PARTICLES){
+        return;
+    }
+
+    Particle* p = &particles[particleCount++];
+    p->x = x;
+    p->y = y;
+    p->vx = vx;
+    p->vy = vy;
+    p->active = true;
+    p->lifespan = 10;
+    p->size = 2 + rand() % 3;
+    p->r = 1.0;
+    p->g = 0.0;
+    p->b = 0.0;
+}
+
 void drawParticles() {
-    for (int i = 0; i < particleCount; i++) {
+    // Pre-calculate common values
+    const int maxParticles = fmin(particleCount, MAX_ACTIVE_PARTICLES);
+    
+    // Batch similar colors
+    for (int i = 0; i < maxParticles; i++) {
         if (particles[i].active) {
-
-            double lifespanRatio = particles[i].lifespan / 10.0; 
-
-            if (lifespanRatio > 1.0) lifespanRatio = 1.0;
-            if (lifespanRatio < 0.0) lifespanRatio = 0.0;
-
-            double g_lifespan = (1.0 - lifespanRatio);
-            double b_lifespan = (1.0 - lifespanRatio);
-
-            double g_total = g_lifespan + particles[i].g;
-            double b_total = b_lifespan + particles[i].b;
-
-            if (g_total > 1.0) g_total = 1.0;
-            if (b_total > 1.0) b_total = 1.0;
-
-            int r = 255;
-            int g = (int)(g_total * 255);
-            int b = (int)(b_total * 255);
-
-            if (g > 255) g = 255;
-            if (g < 0) g = 0;
-            if (b > 255) b = 255;
-            if (b < 0) b = 0;
-
-            iSetColor(r, g, b);
+            double lifespanRatio = fmax(0.0, fmin(1.0, particles[i].lifespan / 10.0));
+            int colorValue = (int)((1.0 - lifespanRatio) * 255);
+            
+            iSetColor(255, colorValue, colorValue);
             iFilledCircle(particles[i].x, particles[i].y, particles[i].size);
         }
     }
 }
+
+// void drawParticles() {
+//     for (int i = 0; i < particleCount; i++) {
+//         if (particles[i].active) {
+
+//             double lifespanRatio = particles[i].lifespan / 10.0; 
+
+//             if (lifespanRatio > 1.0) lifespanRatio = 1.0;
+//             if (lifespanRatio < 0.0) lifespanRatio = 0.0;
+
+//             double g_lifespan = (1.0 - lifespanRatio);
+//             double b_lifespan = (1.0 - lifespanRatio);
+
+//             double g_total = g_lifespan + particles[i].g;
+//             double b_total = b_lifespan + particles[i].b;
+
+//             if (g_total > 1.0) g_total = 1.0;
+//             if (b_total > 1.0) b_total = 1.0;
+
+//             int r = 255;
+//             int g = (int)(g_total * 255);
+//             int b = (int)(b_total * 255);
+
+//             if (g > 255) g = 255;
+//             if (g < 0) g = 0;
+//             if (b > 255) b = 255;
+//             if (b < 0) b = 0;
+
+//             iSetColor(r, g, b);
+//             iFilledCircle(particles[i].x, particles[i].y, particles[i].size);
+//         }
+//     }
+// }
 
 void checkEnemies() {
     for (int i = 0; i < enemyCount; i++) {
@@ -410,22 +834,66 @@ void drawStars() {
 }
 
 void moveRocket() {
-    if (moveUp && rocketY + rocketSpeed <= winHeight) {
-        rocketY += rocketSpeed;
-        moveUp = false;
+    static double lastTime = iGetTime();
+    double currentTime = iGetTime();
+    double deltaTime = currentTime - lastTime;
+    lastTime = currentTime;
+
+    // Scale movement by deltaTime for frame independence
+    double acceleration = PLAYER_ACCELERATION * deltaTime * 60.0; // Normalized for 60fps
+    double friction = pow(PLAYER_FRICTION, deltaTime * 60.0);
+
+    // Update velocities with input
+    if (moveUp)    playerVY += acceleration;
+    if (moveDown)  playerVY -= acceleration;
+    if (moveLeft)  playerVX -= acceleration;
+    if (moveRight) playerVX += acceleration;
+
+    // Apply speed limits
+    playerVX = fmax(-PLAYER_MAX_SPEED, fmin(PLAYER_MAX_SPEED, playerVX));
+    playerVY = fmax(-PLAYER_MAX_SPEED, fmin(PLAYER_MAX_SPEED, playerVY));
+
+    // Apply friction once
+    playerVX *= friction;
+    playerVY *= friction;
+
+    // Cache boundary values
+    double leftBound = playerRadius;
+    double rightBound = winWidth - playerRadius;
+    double topBound = winHeight - playerRadius;
+    double bottomBound = playerRadius;
+
+    // Update position with boundary check
+    double newX = rocketX + playerVX;
+    double newY = rocketY + playerVY;
+
+    // Boundary collision with clamping
+    if (newX < leftBound) {
+        newX = leftBound;
+        playerVX = 0;
+    } else if (newX > rightBound) {
+        newX = rightBound;
+        playerVX = 0;
     }
-    if (moveDown && rocketY - rocketSpeed >= 0) {
-        rocketY -= rocketSpeed;
-        moveDown = false;
+
+    if (newY < bottomBound) {
+        newY = bottomBound;
+        playerVY = 0;
+    } else if (newY > topBound) {
+        newY = topBound;
+        playerVY = 0;
     }
-    if (moveLeft && rocketX - rocketSpeed >= 0) {
-        rocketX -= rocketSpeed;
-        moveLeft = false;
-    }
-    if (moveRight && rocketX + rocketSpeed <= winWidth) {
-        rocketX += rocketSpeed;
-        moveRight = false;
-    }
+
+    // Apply movement with smoothing
+    rocketX = rocketX * MOVEMENT_SMOOTHING + newX * (1.0 - MOVEMENT_SMOOTHING);
+    rocketY = rocketY * MOVEMENT_SMOOTHING + newY * (1.0 - MOVEMENT_SMOOTHING);
+
+    // Stop if very slow
+    if (fabs(playerVX) < MIN_VELOCITY) playerVX = 0;
+    if (fabs(playerVY) < MIN_VELOCITY) playerVY = 0;
+
+    // Reset movement flags
+    moveUp = moveDown = moveLeft = moveRight = false;
 }
 
 void moveProjectiles() {
@@ -457,7 +925,6 @@ void checkParticleCollisions() {
                     if (particles[i].g > 1.0) particles[i].g = 1.0;
                     if (particles[i].b > 1.0) particles[i].b = 1.0;
 
-                    projectiles[j] = projectiles[projectileCount - 1];
                     projectileCount--;
                     j--; 
                 }
@@ -465,6 +932,9 @@ void checkParticleCollisions() {
         }
     }
 }
+
+
+
 
 void damageEnemy(int index) {
     if (enemies[index].active) {
@@ -483,42 +953,122 @@ void damageEnemy(int index) {
 }
 
 
-bool isPointInPolygon(double px, double py, Enemy e) {
-    int numSides = e.sides;
-    double *xCoords = (double *)malloc(numSides * sizeof(double));
-    double *yCoords = (double *)malloc(numSides * sizeof(double));
+bool isPointInPolygon(double px, double py, Enemy* e) {
 
-    for (int j = 0; j < numSides; j++) {
-        double theta = 2 * PI * j / numSides + e.angle;
-        xCoords[j] = e.x + e.radius * cos(theta);
-        yCoords[j] = e.y + e.radius * sin(theta);
-    }
+    int intersectionCount = 0;
+    int sides = e->sides;
+    
+    for(int i=0; i<sides; i++){
+        double theta1 = 2*PI*i/sides+e->angle;
+        double theta2 = 2*PI*(i+1)/sides+e->angle;
 
-    bool inside = false;
-    for (int i = 0, j = numSides - 1; i < numSides; j = i++) {
-        if (((yCoords[i] > py) != (yCoords[j] > py)) &&
-            (px < (xCoords[j] - xCoords[i]) * (py - yCoords[i]) / (yCoords[j] - yCoords[i]) + xCoords[i])) {
-            inside = !inside;
+        double x1 = e->x + e->radius * cos(theta1);
+        double y1 = e->y + e->radius * sin(theta1);
+        double x2 = e->x + e->radius * cos(theta2);
+        double y2 = e->y + e->radius * sin(theta2);
+
+        if(((y1 > py) != (y2 > py)) &&
+           (px < (x2 - x1) * (py - y1) / (y2 - y1) + x1)) {
+            intersectionCount++;
         }
     }
 
-    free(xCoords);
-    free(yCoords);
+    return (intersectionCount % 2)==1;
 
-    return inside;
+    // int numSides = e.sides;
+    // double *xCoords = (double *)malloc(numSides * sizeof(double));
+    // double *yCoords = (double *)malloc(numSides * sizeof(double));
+
+    // for (int j = 0; j < numSides; j++) {
+    //     double theta = 2 * PI * j / numSides + e.angle;
+    //     xCoords[j] = e.x + e.radius * cos(theta);
+    //     yCoords[j] = e.y + e.radius * sin(theta);
+    // }
+
+    // bool inside = false;
+    // for (int i = 0, j = numSides - 1; i < numSides; j = i++) {
+    //     if (((yCoords[i] > py) != (yCoords[j] > py)) &&
+    //         (px < (xCoords[j] - xCoords[i]) * (py - yCoords[i]) / (yCoords[j] - yCoords[i]) + xCoords[i])) {
+    //         inside = !inside;
+    //     }
+    // }
+
+    // free(xCoords);
+    // free(yCoords);
+
+    // return inside;
+}
+
+void updateProjectiles(double deltaTime){
+    for(int i=0;i<projectileCount;i++){
+        if(!projectiles[i].active) continue;
+
+        projectiles[i].x += projectiles[i].vx;
+        projectiles[i].y += projectiles[i].vy;
+
+        projectiles[i].lifetime -= deltaTime;
+
+        if(projectiles[i].lifetime <= 0 || projectiles[i].x < 0 || projectiles[i].x > winWidth || projectiles[i].y<0 || projectiles[i].y>winHeight){
+            projectiles[i].active = false;
+            continue;
+        }
+    }
+
+    int activeCount = 0;
+    for(int i = 0; i < projectileCount; i++) {
+        if(projectiles[i].active) {
+            if(i != activeCount) {
+                projectiles[activeCount] = projectiles[i];
+            }
+            activeCount++;
+        }
+    }
+    projectileCount = activeCount;
 }
 
 void checkProjectileCollisions() {
-    for (int i = 0; i < projectileCount; i++) {
-        for (int j = 0; j < enemyCount; j++) {
-            if (enemies[j].active && isPointInPolygon(projectiles[i].x, projectiles[i].y, enemies[j])) {
+    for(int i = 0; i < projectileCount; i++) {
+        if(!projectiles[i].active) continue;
+        
+        bool hitEnemy = false;
+        for(int j = 0; j < enemyCount; j++) {
+            if(!enemies[j].active) continue;
+            
+            if(isPointInPolygon(projectiles[i].x, projectiles[i].y, &enemies[j])) {
                 damageEnemy(j);
-                projectiles[i] = projectiles[projectileCount - 1];
-                projectileCount--;
-                i--;
+                hitEnemy = true;
                 break;
             }
         }
+        
+        if(hitEnemy) {
+            projectiles[i].active = false;
+        }
+    }
+}
+
+void createSingleBullet(double startX, double startY, double angle) {
+    if(projectileCount >= MAX_BULLET) return;
+    
+    Projectile* bullet = &projectiles[projectileCount++];
+    bullet->x = startX;
+    bullet->y = startY;
+    bullet->angle = angle;
+    bullet->vx = BULLET_SPEED * cos(angle);
+    bullet->vy = BULLET_SPEED * sin(angle);
+    bullet->active = true;
+    bullet->lifetime = BULLET_LIFETIME;
+}
+
+void createBullet(double startX, double startY, double angle) {
+    if (hasTripleShot) {
+        // Create 3 bullets at different angles
+        double spreadAngle = 0.2;  // About 11 degrees
+        createSingleBullet(startX, startY, angle);
+        createSingleBullet(startX, startY, angle + spreadAngle);
+        createSingleBullet(startX, startY, angle - spreadAngle);
+    } else {
+        createSingleBullet(startX, startY, angle);
     }
 }
 
@@ -646,12 +1196,18 @@ void iDraw() {
         moveProjectiles();
         moveEnemies();
         drawEnemies();
+        updateProjectiles(deltaTime);
         checkProjectileCollisions();
 
         checkParticleCollisions();
         checkEnemies();
         updateParticles(deltaTime);
         drawParticles();
+        updateGrid();
+        updatePowerUps(deltaTime);
+        drawPowerUps();
+        drawNotification(deltaTime);
+        drawPlayerHearts();
 
         for (int i = 0; i < enemyCount; i++) {
             if (enemies[i].active && isPlayerCollidingWithEnemy(enemies[i])) {
@@ -663,8 +1219,7 @@ void iDraw() {
 
                     if (playerLives <= 0) {
                         printf("Game Over! Restarting...\n");
-                        //Restart
-                        playerLives = 3;
+                        playerLives = 3;  // Reset to 3 hearts
                         currentLevel = 1;
                         enemiesDestroyed = 0;
                         enemyCount = 0;
@@ -745,26 +1300,20 @@ void iMouse(int button, int state, int mx, int my) {
 
         double currentTime = iGetTime();
 
-        if(currentTime - lastShotTime >= shootInterval){
-            angle = atan2(my - rocketY, mx - rocketX);
-            PlaySound(TEXT("bullet.wav"), NULL, SND_ASYNC);
-
-            if (projectileCount < MAX_BULLET) {
+        if(button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
+        double currentTime = iGetTime();
+        
+            if(currentTime - lastShotTime >= shootInterval) {
+                angle = atan2(my - rocketY, mx - rocketX);
+                PlaySound(TEXT("bullet.wav"), NULL, SND_ASYNC);
+                
+                // Calculate bullet spawn position at rocket tip
                 double tipX = rocketX + (rocketSize / 2) * cos(angle);
                 double tipY = rocketY + (rocketSize / 2) * sin(angle);
-
-                double bulletSpeed = 0.8; 
-
-                projectiles[projectileCount].x = tipX;
-                projectiles[projectileCount].y = tipY;
-
-                projectiles[projectileCount].vx = bulletSpeed * cos(angle);
-                projectiles[projectileCount].vy = bulletSpeed * sin(angle);
-
-                projectiles[projectileCount].angle = angle;
-                projectileCount++;
+                
+                createBullet(tipX, tipY, angle);
+                lastShotTime = currentTime;
             }
-            lastShotTime = currentTime;
         }
 
         if (gamestate == 0 && mx >= 30 && mx<=210 &&
