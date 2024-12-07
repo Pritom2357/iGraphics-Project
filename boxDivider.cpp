@@ -210,7 +210,7 @@ void damageEnemy(int index);
 bool isPointInPolygon(double px, double py, Enemy* e);
 void checkProjectileCollisions();
 double iGetTime();
-void drawHeart(double x, double y, double size);
+// void drawHeart(double x, double y, double size);
 bool isPlayerCollidingWithEnemy(Enemy e);
 void iDraw();
 void iMouse(int button, int state, int x, int y);
@@ -1093,24 +1093,24 @@ bool isPlayerCollidingWithEnemy(Enemy e) {
 }
 
 
-void drawHeart(double x, double y, double size) {
-    int points = 30;
-    double angleStep = (2 * PI) / points;
-    double verticesX[30];
-    double verticesY[30];
+// void drawHeart(double x, double y, double size) {
+//     int points = 30;
+//     double angleStep = (2 * PI) / points;
+//     double verticesX[30];
+//     double verticesY[30];
 
-    for(int i = 0; i < points; i++) {
-        double theta = i * angleStep;
-        double scale = 16 * pow(sin(theta), 3);
-        double px = size * scale / 16;
-        double py = size * (13 * cos(theta) - 5 * cos(2 * theta) - 2 * cos(3 * theta) - cos(4 * theta)) / 16;
-        verticesX[i] = x + px;
-        verticesY[i] = y + py;
-    }
+//     for(int i = 0; i < points; i++) {
+//         double theta = i * angleStep;
+//         double scale = 16 * pow(sin(theta), 3);
+//         double px = size * scale / 16;
+//         double py = size * (13 * cos(theta) - 5 * cos(2 * theta) - 2 * cos(3 * theta) - cos(4 * theta)) / 16;
+//         verticesX[i] = x + px;
+//         verticesY[i] = y + py;
+//     }
 
-    iSetColor(255, 0, 0);
-    iFilledPolygon(verticesX, verticesY, points);
-}
+//     iSetColor(255, 0, 0);
+//     iFilledPolygon(verticesX, verticesY, points);
+// }
 
 
 bool f = false;
@@ -1269,9 +1269,9 @@ void iDraw() {
         iSetColor(255, 255, 255); 
         iText(levelBarX + levelBarWidth / 2.0 - 20, levelBarY + levelBarHeight + 5, levelText, GLUT_BITMAP_HELVETICA_18);
 
-        for(int i = 0; i < playerLives; i++) {
-            drawHeart(20 + i * 40, winHeight - 40, 20); 
-        }
+        // for(int i = 0; i < playerLives; i++) {
+        //     drawHeart(20 + i * 40, winHeight - 40, 20); 
+        // }
     }
     else if (gamestate == 2) { // About
         iClear();
