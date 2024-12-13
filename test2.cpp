@@ -199,7 +199,7 @@ void checkLevelUp() {
 
 // Draw the player
 void drawPlayer() {
-    if (player.shapeType == 0) { // Triangle
+    if (player.shapeType == 0) { 
         double size = 20;
         double x1 = player.x + size * cos(player.angle);
         double y1 = player.y + size * sin(player.angle);
